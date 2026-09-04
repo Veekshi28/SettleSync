@@ -50,6 +50,7 @@ def normalize_all(raw: dict) -> list[dict]:
         normalized.append({
             "record_id":                  s["txn_id"],
             "norm_invoice_id":            norm_id,
+            "merchant_gstin":             s["merchant_gstin"],
             "vendor_gstin_settlement":    s["vendor_gstin"],
             "vendor_gstin_books":         books["vendor_gstin"] if books else None,
             "settlement_date":            s["settlement_date"],

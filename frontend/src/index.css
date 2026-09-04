@@ -1,0 +1,135 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-bg: #08101f;
+  --color-surface: #0f1a2e;
+  --color-surface-2: #162035;
+  --color-border: #1e3050;
+  --color-border-2: #243b60;
+
+  --color-text-1: #f1f5f9;
+  --color-text-2: #94a3b8;
+  --color-text-3: #475569;
+
+  --color-emerald: #10b981;
+  --color-emerald-dim: #064e3b;
+  --color-amber: #f59e0b;
+  --color-amber-dim: #451a03;
+  --color-rose: #f43f5e;
+  --color-rose-dim: #4c0519;
+  --color-blue: #3b82f6;
+  --color-blue-dim: #1e3a5f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text-1);
+  font-family: "Inter", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-2);
+  border-radius: 6px;
+}
+
+.mono {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+
+.page-fade {
+  animation: page-fade-in 200ms ease-out;
+}
+
+@keyframes page-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.pulse-dot {
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.line-fade-in {
+  animation: line-fade-in 150ms ease-out;
+}
+
+.sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  margin-bottom: 2px;
+  border-radius: 6px;
+  border-left: 2px solid transparent;
+  color: var(--color-text-2);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.sidebar-link:hover {
+  background: var(--color-surface-2);
+}
+.sidebar-link-active {
+  background: var(--color-surface-2);
+  border-left-color: var(--color-emerald);
+  color: var(--color-text-1);
+}
+
+.action-btn-emerald:hover {
+  background: var(--color-emerald-dim) !important;
+}
+.action-btn-rose:hover {
+  background: var(--color-rose-dim) !important;
+}
+.action-btn-amber:hover {
+  background: var(--color-amber-dim) !important;
+}
+
+.send-btn:hover:not(:disabled) {
+  background: var(--color-emerald-dim) !important;
+  border-color: var(--color-emerald) !important;
+  color: var(--color-emerald) !important;
+}
+
+@keyframes line-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

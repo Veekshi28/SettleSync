@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 audit/ledger.jsonl
+audit/batch_history.db
+CLAUDE.md
+frontend/node_modules/
+frontend/dist/

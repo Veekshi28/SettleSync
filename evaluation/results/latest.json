@@ -13,6 +13,13 @@
     "RULE_37A": 8,
     "MISSING_ENTRY": 9
   },
+  "total_itc_risk_paise": 438133772,
+  "itc_at_risk_by_class": {
+    "AMOUNT_MISMATCH": 24281372,
+    "ITC_TIME_BAR": 126496900,
+    "RULE_37A": 174194300,
+    "MISSING_ENTRY": 113161200
+  },
   "exc_classification_accuracy": 100.0,
   "exc_classified_correctly": 37,
   "exc_total": 37,
@@ -21,5 +28,32 @@
   "silent_drops": 0,
   "abstention_quality": 100.0,
   "should_be_exceptions": 37,
-  "correctly_escalated": 37
+  "correctly_escalated": 37,
+  "confidence_calibration": [
+    {
+      "bucket": "0.50\u20130.70",
+      "count": 0,
+      "correct": 0,
+      "precision": null
+    },
+    {
+      "bucket": "0.70\u20130.85",
+      "count": 0,
+      "correct": 0,
+      "precision": null
+    },
+    {
+      "bucket": "0.85\u20130.95",
+      "count": 0,
+      "correct": 0,
+      "precision": null
+    },
+    {
+      "bucket": "0.95\u20131.00",
+      "count": 40,
+      "correct": 40,
+      "precision": 100.0
+    }
+  ],
+  "calibration_quality": "Well-calibrated"
 }

@@ -60,13 +60,15 @@ def evaluate(
     ss_results = {}
     exception_classes = {}
     false_matches = 0
+    itc_at_risk_by_class: dict[str, int] = {}
+    total_itc_risk_paise = 0
 
     for r in normalized:
         rid = r["record_id"]
         match = run_three_way_match(r, run_date=run_date)
 
         if match["matched"]:
-            ss_results[rid] = ("matched", match["type"], None)
+            ss_results[rid] = ("matched", match["type"], match["confidence"])
             # Check against ground truth for false match detection
             truth = gt.get(rid, "")
             if truth in ("RULE_37A", "ITC_TIME_BAR", "AMOUNT_MISMATCH",
@@ -89,6 +91,10 @@ def evaluate(
             exception_classes[exc.exception_class] = (
                 exception_classes.get(exc.exception_class, 0) + 1
             )
+            itc_at_risk_by_class[exc.exception_class] = (
+                itc_at_risk_by_class.get(exc.exception_class, 0) + exc.itc_risk_paise
+            )
+            total_itc_risk_paise += exc.itc_risk_paise
 
     ss_matched = sum(1 for v in ss_results.values() if v[0] == "matched")
     ss_rate = ss_matched / total
@@ -139,6 +145,42 @@ def evaluate(
         if should_be_exceptions else 1.0
     )
 
+    # ── Confidence calibration ──────────────────────────────────────────────
+    # When the engine reports high confidence, does it actually get it right?
+    # Only auto-resolved ("matched") records carry a confidence score — a
+    # match is "correct" here if ground truth says it was actually safe to
+    # auto-resolve (EXACT_MATCH or TIMING_DIFF); any other ground truth on a
+    # matched record would be a false match (see unsafe_closure_count above).
+    BUCKETS = [(0.50, 0.70), (0.70, 0.85), (0.85, 0.95), (0.95, 1.01)]
+    BUCKET_LABELS = ["0.50–0.70", "0.70–0.85", "0.85–0.95", "0.95–1.00"]
+    SAFE_TO_MATCH = {"EXACT_MATCH", "TIMING_DIFF"}
+
+    calibration = []
+    for (lo, hi), label in zip(BUCKETS, BUCKET_LABELS):
+        bucket_records = [
+            (rid, result) for rid, result in ss_results.items()
+            if result[0] == "matched" and lo <= result[2] <= hi
+        ]
+
+        if not bucket_records:
+            calibration.append({"bucket": label, "count": 0, "correct": 0, "precision": None})
+            continue
+
+        correct = sum(1 for rid, _ in bucket_records if gt.get(rid, "") in SAFE_TO_MATCH)
+        precision = round(correct / len(bucket_records) * 100, 1)
+        calibration.append({
+            "bucket": label,
+            "count": len(bucket_records),
+            "correct": correct,
+            "precision": precision,
+        })
+
+    high_conf_bucket = calibration[-1]
+    calibration_quality = (
+        "Well-calibrated" if high_conf_bucket.get("precision") == 100
+        else "Review confidence thresholds"
+    )
+
     report = {
         "total_records":          total,
         "settlesync_matched":     ss_matched,
@@ -149,6 +191,8 @@ def evaluate(
         "false_matches":          false_matches,
         "false_match_rate":       round(false_matches / total * 100, 2),
         "exception_classes":      exception_classes,
+        "total_itc_risk_paise":   total_itc_risk_paise,
+        "itc_at_risk_by_class":   itc_at_risk_by_class,
         "exc_classification_accuracy": (
             round(exc_correct / exc_total * 100, 2) if exc_total else 0
         ),
@@ -160,6 +204,8 @@ def evaluate(
         "abstention_quality":      round(abstention_quality * 100, 2),
         "should_be_exceptions":    should_be_exceptions,
         "correctly_escalated":     correctly_not_auto_resolved,
+        "confidence_calibration":  calibration,
+        "calibration_quality":     calibration_quality,
     }
 
     # Save results (commit this file)
@@ -192,4 +238,13 @@ if __name__ == "__main__":
     print(f"The headline: {r['unsafe_closure_count']} unsafe auto-closures out of {r['total_records']} records.")
     for cls, count in sorted(r["exception_classes"].items()):
         print(f"  {cls:20s}: {count}")
+    print()
+    print(f"Total ITC at risk:           Rs {r['total_itc_risk_paise']/100:,.2f}")
+    for cls, paise in sorted(r["itc_at_risk_by_class"].items()):
+        print(f"  {cls:20s}: Rs {paise/100:,.2f}")
+    print()
+    print(f"Confidence calibration ({r['calibration_quality']}):")
+    for b in r["confidence_calibration"]:
+        precision = f"{b['precision']:.1f}%" if b["precision"] is not None else "—"
+        print(f"  {b['bucket']:12s}: {b['count']:3d} matched, {precision} precision")
     print("-----------------------------------------------------------")

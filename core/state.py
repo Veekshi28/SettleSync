@@ -59,6 +59,9 @@ class RecordEntry:
     exception_rule: Optional[str] = None
     exception_hint: Optional[str] = None
     exception_confidence: float = 0.0
+    itc_risk_paise: int = 0
+    itc_risk_label: str = ""
+    playbook_completed: dict = field(default_factory=dict)  # {step_number: {"ts": str, "note": str}}
     # Human action
     human_action: Optional[str] = None    # "approved" | "rejected" | "escalated"
     human_note: Optional[str] = None
