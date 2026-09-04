@@ -5,6 +5,7 @@ Run: pytest tests/ -v
 import pytest
 from datetime import date
 from core.classify import classify, ExceptionResult
+from core.match import run_three_way_match
 from audit.ledger import AuditLedger
 import tempfile, os
 
@@ -91,6 +92,7 @@ def test_timing_difference_cross_period():
         vendor_gstin_settlement="29AABCI1234P1Z5",
         vendor_gstin_books="29AABCI1234P1Z5",
         supplier_filed=True,
+        run_date=date(2025, 4, 10),       # well before the Sec 16(4) deadline
     )
     assert result.exception_class == "TIMING_DIFF"
 
@@ -108,6 +110,24 @@ def test_missing_entry():
         supplier_filed=True,
     )
     assert result.exception_class == "MISSING_ENTRY"
+
+
+def test_gstin_conflict_blocks_match():
+    """WHATBROKE Incident 001 — same vendor name, different GSTIN must never auto-match."""
+    record = {
+        "norm_invoice_id":         "INV0701",
+        "vendor_gstin_settlement": "27AAJCS1111A1Z1",   # Sharma Enterprises GSTIN A
+        "vendor_gstin_books":      "29AABCS2222B1Z2",   # Sharma Enterprises GSTIN B
+        "settlement_amount_paise": 150000,
+        "books_total_paise":       150000,              # amounts agree exactly
+        "settlement_date":         date(2025, 6, 5),
+        "books_invoice_date":      date(2025, 6, 1),
+        "vendor_name_settlement":  "Sharma Enterprises",
+        "vendor_name_books":       "Sharma Enterprises",  # identical name
+        "gstr_supplier_filed":     True,
+    }
+    result = run_three_way_match(record, run_date=date(2025, 6, 10))
+    assert result["matched"] is False
 
 
 # ── Ledger tests ──────────────────────────────────────────────────────────

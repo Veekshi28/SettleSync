@@ -1,0 +1,25 @@
+{
+  "total_records": 77,
+  "settlesync_matched": 40,
+  "settlesync_match_rate": 51.95,
+  "baseline_matched": 17,
+  "baseline_match_rate": 22.08,
+  "improvement_pp": 29.87,
+  "false_matches": 0,
+  "false_match_rate": 0.0,
+  "exception_classes": {
+    "AMOUNT_MISMATCH": 12,
+    "ITC_TIME_BAR": 8,
+    "RULE_37A": 8,
+    "MISSING_ENTRY": 9
+  },
+  "exc_classification_accuracy": 100.0,
+  "exc_classified_correctly": 37,
+  "exc_total": 37,
+  "unsafe_closure_count": 0,
+  "unsafe_closure_rate": 0.0,
+  "silent_drops": 0,
+  "abstention_quality": 100.0,
+  "should_be_exceptions": 37,
+  "correctly_escalated": 37
+}

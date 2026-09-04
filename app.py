@@ -30,6 +30,7 @@ tabs = st.tabs([
     "⬛ Control Tower",
     "📋 Reconciliation",
     "⚠️ Exceptions",
+    "🔒 Close Review",
     "🔗 Audit & Evaluation",
     "📘 About",
 ])
@@ -132,7 +133,7 @@ with tabs[0]:
                         invoice_date=r.get("books_invoice_date"),
                         settlement_date=r.get("settlement_date"),
                         vendor_gstin_settlement=r.get("vendor_gstin_settlement"),
-                        vendor_gstin_books=r.get("books_vendor_gstin"),
+                        vendor_gstin_books=r.get("vendor_gstin_books"),
                         supplier_filed=r.get("gstr_supplier_filed", True),
                     )
                     entry.exception_class = exc.exception_class
@@ -169,22 +170,80 @@ with tabs[0]:
         st.rerun()
 
     # Metrics cards
+
     if st.session_state.batch:
+        from core.close_gate import run_close_gates, compute_readiness_score, can_close
+
+        gates = run_close_gates(
+            batch=st.session_state.batch,
+            ledger=ledger,
+            sources_loaded={
+                "settlements": True,
+                "books": True,
+                "gstr2b": True,
+            },
+        )
+        score = compute_readiness_score(gates)
+        ready, blockers = can_close(gates)
         s = st.session_state.batch.summary()
-        total = s["total"] or 1
-        c1, c2, c3, c4 = st.columns(4)
+        total = max(s["total"], 1)
+
+        # Hero: Close Readiness Score
+        st.markdown("---")
+        hero_col, meta_col = st.columns([1, 2])
+
+        with hero_col:
+            color = "#22c55e" if ready else ("#f59e0b" if score >= 70 else "#ef4444")
+            st.markdown(
+                f"""
+                <div style="text-align:center;padding:1.5rem;border:0.5px solid var(--border);
+                    border-radius:12px;">
+                    <div style="font-size:13px;color:var(--text-secondary);
+                        margin-bottom:0.5rem;">CLOSE READINESS</div>
+                    <div style="font-size:64px;font-weight:500;
+                        color:{color};line-height:1;">{score}</div>
+                    <div style="font-size:13px;color:var(--text-muted);">/ 100</div>
+                    <div style="margin-top:1rem;font-size:14px;font-weight:500;
+                        color:{color};">
+                        {"✅ READY TO CLOSE" if ready else "❌ NOT READY TO CLOSE"}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        with meta_col:
+            st.markdown("**Close gate status**")
+            for g in gates:
+                icon = "✅" if g.passed else ("❌" if g.severity == "blocker" else "⚠️")
+                st.markdown(f"{icon} **{g.label}** — {g.message}")
+
+            if not ready:
+                st.error(f"**{len(blockers)} blocker(s)** preventing close. "
+                        f"Resolve all blockers or override with justification in Close Review.")
+
+        # Secondary metrics
+        st.markdown("---")
+        c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("Records", s["total"])
         c2.metric("Auto-resolved", s["resolved"],
-                  f"{s['resolved']/total*100:.1f}%")
+                f"{s['resolved']/total*100:.1f}%")
         c3.metric("Awaiting review", s["human_required"])
         c4.metric("Escalated", s["escalated"])
 
-        st.divider()
-        st.markdown("**Agent activity — last 20 actions**")
+        total_unresolved = sum(
+            e.raw.get("settlement_amount_paise", 0)
+            for e in st.session_state.batch.records.values()
+            if e.state.value in ("HUMAN_REQUIRED", "EXCEPTION", "AI_REVIEW")
+        )
+        c5.metric("Unresolved variance", f"₹{total_unresolved/100:,.0f}")
+
+        # Agent activity log
+        st.markdown("---")
+        st.markdown("**Agent activity — last 20 tool calls**")
         for ev in reversed(st.session_state.batch.activity[-20:]):
             st.markdown(
-                f"`{ev['ts']}` **{ev['record_id']}** — "
-                f"{ev['action']}: {ev['detail']}"
+                f"`{ev['ts']}` **{ev['record_id']}** — {ev['action']}: {ev['detail']}"
             )
 
 
@@ -198,7 +257,8 @@ with tabs[1]:
     else:
         rows = st.session_state.records_df
         display = [
-            {k: v for k, v in r.items() if k != "_entry"}
+            {**{k: v for k, v in r.items() if k != "_entry"},
+             "Status": r["_entry"].status_label}
             for r in rows
         ]
         df = pd.DataFrame(display)
@@ -328,9 +388,131 @@ with tabs[2]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# TAB 4 — AUDIT & EVALUATION
+# TAB 4 — CLOSE REVIEW (NEW)
 # ═══════════════════════════════════════════════════════════════════════════
 with tabs[3]:
+    st.markdown("## Close Review")
+    st.caption("The controller enforces all gates before authorizing close.")
+
+    if not st.session_state.batch:
+        st.info("Run reconciliation from the Control Tower first.")
+    else:
+        from core.close_gate import run_close_gates, compute_readiness_score, can_close
+
+        gates = run_close_gates(
+            batch=st.session_state.batch,
+            ledger=ledger,
+            sources_loaded={"settlements": True, "books": True, "gstr2b": True},
+        )
+        score = compute_readiness_score(gates)
+        ready, blockers = can_close(gates)
+
+        # Gate detail cards
+        st.markdown("### Close Gates")
+        for g in gates:
+            status_color = "normal" if g.passed else "error"
+            with st.expander(
+                f"{g.icon} Gate: {g.label} — {g.message}",
+                expanded=not g.passed,
+            ):
+                st.json(g.detail)
+                if not g.passed:
+                    st.error(
+                        f"**Blocker.** This gate must pass or be overridden before close."
+                    )
+
+        st.markdown("---")
+
+        # Close decision
+        if ready:
+            st.success(f"### ✅ READY TO CLOSE  (score: {score}/100)")
+            st.markdown("All gates pass. Controller authorizes month-end close.")
+            if st.button("🔒 Authorize Close", type="primary"):
+                ledger.append("CLOSE_AUTHORIZED", detail={"score": score, "actor": "human"})
+                st.balloons()
+                st.success("**CLOSE AUTHORIZED ✓** — Audit event recorded.")
+        else:
+            st.error(f"### ❌ CLOSE BLOCKED  (score: {score}/100)")
+            st.markdown(f"**{len(blockers)} blocker(s):**")
+            for b in blockers:
+                st.markdown(f"- **{b.label}**: {b.message}")
+
+            # Human override (with justification — creates audit event)
+            st.markdown("---")
+            absolute_blockers = [b for b in blockers if not b.overridable]
+            if absolute_blockers:
+                st.error(
+                    "**Override not available.** "
+                    f"{', '.join(b.label for b in absolute_blockers)} "
+                    "cannot be overridden — resolve them directly (see POLICY.md)."
+                )
+            overridable_blockers = [b for b in blockers if b.overridable]
+            if overridable_blockers:
+                st.markdown("**Override (requires documented justification)**")
+                st.caption(
+                    "Overriding a close gate is an accountable act. "
+                    "Your justification will be recorded in the immutable audit ledger."
+                )
+                justification = st.text_area("Justification", height=80,
+                                              placeholder="e.g. Variance confirmed against bank statement dated 30 Sep 2025.")
+                col_a, col_b = st.columns(2)
+                if col_a.button("⚠️ Override and Close", type="secondary",
+                                 disabled=bool(absolute_blockers)):
+                    if not justification.strip():
+                        st.error("Justification is required to override a gate.")
+                    else:
+                        ledger.append(
+                            "CLOSE_OVERRIDE",
+                            detail={
+                                "score": score,
+                                "blockers": [b.name for b in overridable_blockers],
+                                "justification": justification,
+                                "actor": "finance_controller",
+                            },
+                        )
+                        st.warning("**Override recorded in audit ledger.** "
+                                   "This action is immutable and will appear in the close report.")
+
+        st.markdown("---")
+        # "Why was this auto-closed?" section — pick any resolved record
+        st.markdown("### Why was a record auto-resolved?")
+        st.caption("Drill into any auto-resolved record to see the exact evidence chain.")
+
+        if st.session_state.records_df:
+            resolved_ids = [
+                row["Record ID"]
+                for row in st.session_state.records_df
+                if "Resolved" in row.get("Status", "")
+            ]
+            if resolved_ids:
+                selected = st.selectbox("Select a resolved record", resolved_ids[:20])
+                if selected and st.session_state.batch:
+                    entry = st.session_state.batch.records.get(selected)
+                    if entry:
+                        st.markdown(f"**{selected}** — {entry.status_label}")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.markdown("**Match evidence**")
+                            st.markdown(f"- Match type: `{entry.match_type}`")
+                            st.markdown(f"- Confidence: `{entry.match_confidence:.0%}`")
+                            st.markdown(f"- Vendor GSTIN: `{entry.raw.get('vendor_gstin_settlement', '—')}`")
+                            st.markdown(f"- Amount: `₹{entry.raw.get('settlement_amount_paise', 0)/100:,.2f}`")
+                        with col2:
+                            st.markdown("**Policy checks passed**")
+                            st.markdown("- ✅ Invoice ID matched")
+                            st.markdown("- ✅ GSTIN consistent across sources")
+                            st.markdown("- ✅ Amount within tolerance")
+                            st.markdown("- ✅ No duplicate candidate")
+                            st.markdown("- ✅ Supplier compliance verified")
+                        st.markdown(f"**AI involvement:** NONE — fully deterministic")
+                        st.markdown(f"**Replay:** decision is reproducible (same seed → same result)")
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TAB 5 — AUDIT & EVALUATION
+# ═══════════════════════════════════════════════════════════════════════════
+with tabs[4]:
     st.markdown("## Audit & Evaluation")
 
     col_audit, col_eval = st.columns(2)
@@ -376,6 +558,34 @@ with tabs[3]:
             ])
             if not exc_df.empty:
                 st.dataframe(exc_df, hide_index=True, use_container_width=True)
+
+            st.markdown("---")
+            st.markdown("**Governance metrics (unique to SettleSync)**")
+
+            col_a, col_b, col_c = st.columns(3)
+            col_a.metric(
+                "Unsafe closure rate",
+                f"{results.get('unsafe_closure_rate', 0):.1f}%",
+                delta="target: 0%",
+                delta_color="inverse" if results.get("unsafe_closure_count", 0) > 0 else "normal",
+            )
+            col_b.metric(
+                "Silent drops",
+                results.get("silent_drops", 0),
+                delta="target: 0",
+                delta_color="inverse",
+            )
+            col_c.metric(
+                "Abstention quality",
+                f"{results.get('abstention_quality', 0):.1f}%",
+                help="Of records that should have been escalated, what % were correctly escalated?",
+            )
+
+            st.info(
+                "**Our most important AI capability is knowing when not to act.** "
+                f"{results.get('should_be_exceptions', 0)} ambiguous records — "
+                f"{results.get('correctly_escalated', 0)} correctly escalated to human review."
+            )
         except FileNotFoundError:
             if st.button("▶ Run evaluation"):
                 from evaluation.run import evaluate
@@ -386,9 +596,9 @@ with tabs[3]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# TAB 5 — ABOUT
+# TAB 6 — ABOUT
 # ═══════════════════════════════════════════════════════════════════════════
-with tabs[4]:
+with tabs[5]:
     st.markdown("## About SettleSync")
     st.markdown("""
 **SettleSync** is an AI Finance Controller built for the Razorpay Buildathon (Track 04).

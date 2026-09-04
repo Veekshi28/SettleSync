@@ -63,7 +63,7 @@ def evaluate(
 
     for r in normalized:
         rid = r["record_id"]
-        match = run_three_way_match(r)
+        match = run_three_way_match(r, run_date=run_date)
 
         if match["matched"]:
             ss_results[rid] = ("matched", match["type"], None)
@@ -81,7 +81,7 @@ def evaluate(
                 invoice_date=r.get("books_invoice_date"),
                 settlement_date=r.get("settlement_date"),
                 vendor_gstin_settlement=r.get("vendor_gstin_settlement"),
-                vendor_gstin_books=r.get("books_vendor_gstin"),
+                vendor_gstin_books=r.get("vendor_gstin_books"),
                 supplier_filed=r.get("gstr_supplier_filed", True),
                 run_date=run_date,
             )
@@ -112,6 +112,33 @@ def evaluate(
         if result and result[0] == "exception" and result[1] == truth:
             exc_correct += 1
 
+    # ── Governance metrics ───────────────────────────────────────────────
+    # Unsafe Closure Rate: records auto-resolved that ground truth says
+    # should have been exceptions.
+    auto_resolved_should_be_exc = 0
+    for rid, truth in gt.items():
+        if truth in ("RULE_37A", "ITC_TIME_BAR", "AMOUNT_MISMATCH",
+                      "MISSING_ENTRY", "GSTIN_CONFLICT_TRAP"):
+            result = ss_results.get(rid)
+            if result and result[0] == "matched":  # auto-resolved when it shouldn't be
+                auto_resolved_should_be_exc += 1
+
+    # Silent drops: records in ground truth not present in results at all
+    silent_drops = sum(1 for rid in gt if rid not in ss_results)
+
+    # Abstention quality: of records that should be exceptions,
+    # what % were correctly NOT auto-resolved (i.e., correctly escalated)?
+    should_be_exceptions = sum(
+        1 for truth in gt.values()
+        if truth in ("RULE_37A", "ITC_TIME_BAR", "AMOUNT_MISMATCH",
+                      "MISSING_ENTRY", "GSTIN_CONFLICT_TRAP")
+    )
+    correctly_not_auto_resolved = should_be_exceptions - auto_resolved_should_be_exc
+    abstention_quality = (
+        correctly_not_auto_resolved / should_be_exceptions
+        if should_be_exceptions else 1.0
+    )
+
     report = {
         "total_records":          total,
         "settlesync_matched":     ss_matched,
@@ -127,6 +154,12 @@ def evaluate(
         ),
         "exc_classified_correctly":  exc_correct,
         "exc_total":                 exc_total,
+        "unsafe_closure_count":    auto_resolved_should_be_exc,
+        "unsafe_closure_rate":     round(auto_resolved_should_be_exc / total * 100, 2),
+        "silent_drops":            silent_drops,
+        "abstention_quality":      round(abstention_quality * 100, 2),
+        "should_be_exceptions":    should_be_exceptions,
+        "correctly_escalated":     correctly_not_auto_resolved,
     }
 
     # Save results (commit this file)
@@ -139,8 +172,11 @@ def evaluate(
 
 
 if __name__ == "__main__":
+    import sys
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     r = evaluate()
-    print("\n── SETTLESYNC EVALUATION ──────────────────────────────────")
+    print("\n-- SETTLESYNC EVALUATION --------------------------------")
     print(f"Total records:              {r['total_records']}")
     print(f"SettleSync match rate:      {r['settlesync_match_rate']:.1f}%")
     print(f"Baseline match rate:        {r['baseline_match_rate']:.1f}%")
@@ -149,6 +185,11 @@ if __name__ == "__main__":
     print(f"Exception classification:   {r['exc_classification_accuracy']:.1f}% accurate")
     print()
     print("Exception breakdown:")
+    print(f"Unsafe closure rate:        {r['unsafe_closure_rate']:.1f}% (target: 0%)")
+    print(f"Silent drops:               {r['silent_drops']}  (target: 0)")
+    print(f"Abstention quality:         {r['abstention_quality']:.1f}% (correctly escalated)")
+    print(f"")
+    print(f"The headline: {r['unsafe_closure_count']} unsafe auto-closures out of {r['total_records']} records.")
     for cls, count in sorted(r["exception_classes"].items()):
         print(f"  {cls:20s}: {count}")
-    print("───────────────────────────────────────────────────────────")
+    print("-----------------------------------------------------------")

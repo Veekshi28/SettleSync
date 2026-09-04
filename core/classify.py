@@ -148,7 +148,10 @@ def classify(
     # ── Rule 4: Timing difference (cross-period) ──────────────────────────────
     if invoice_date is not None and settlement_date is not None:
         gap_days = abs((settlement_date - invoice_date).days)
-        if gap_days > 30:
+        different_gst_period = (invoice_date.year, invoice_date.month) != (
+            settlement_date.year, settlement_date.month
+        )
+        if gap_days > 30 or different_gst_period:
             return ExceptionResult(
                 exception_class="TIMING_DIFF",
                 confidence=0.87,

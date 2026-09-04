@@ -120,9 +120,11 @@ def generate_dataset(seed: int = 42, n: int = 80) -> list[SyntheticRecord]:
     for i in range(1, 16):
         vendor = VENDORS[rng.randint(0, 4)]
         amount = rng.randint(50000, 300000) * 100
-        # Invoice in March, settlement in April (cross-period)
-        inv_date = date(2025, 3, rng.randint(28, 31))
-        settle_date = date(2025, 4, rng.randint(1, 10))
+        # Invoice in March, settlement in April (cross-period). Uses FY2025-26
+        # (not FY2024-25 like the ITC_TIME_BAR set below) so the Sec 16(4)
+        # deadline check never collides with these purely-timing records.
+        inv_date = date(2026, 3, rng.randint(28, 31))
+        settle_date = date(2026, 4, rng.randint(1, 10))
 
         raw_inv = messy_inv(200 + i, style=rng.randint(0, 2))
         records.append(SyntheticRecord(
@@ -365,15 +367,18 @@ def write_csvs(records: list[SyntheticRecord], out_dir: str = "data/synthetic"):
                 "supplier_filed": r.gstr_supplier_filed,
             })
 
-    # Write ground truth for evaluator (do NOT commit this to the demo repo;
-    # keep it for your evaluation/run.py only)
+    # Ground truth is keyed by settlement_txn_id, NOT the internal RPZ record_id —
+    # settlements.csv (the pipeline's spine) never carries the RPZ id, so that id
+    # is not a valid join key back to the operational data. txn_id is present on
+    # every record (including MISSING_ENTRY / GSTIN_CONFLICT_TRAP) and is what
+    # normalize.py uses as record_id downstream.
     with open(f"{out_dir}/ground_truth.csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["record_id", "ground_truth"])
         w.writeheader()
         for r in records:
-            w.writerow({"record_id": r.record_id, "ground_truth": r.ground_truth})
+            w.writerow({"record_id": r.settlement_txn_id, "ground_truth": r.ground_truth})
 
-    print(f"Generated {len(records)} records → {out_dir}/")
+    print(f"Generated {len(records)} records -> {out_dir}/")
     counts = {}
     for r in records:
         counts[r.ground_truth] = counts.get(r.ground_truth, 0) + 1
