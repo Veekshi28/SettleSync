@@ -98,3 +98,66 @@ Moved the `TIMING_DIFF` synthetic invoices to FY2025-26 so their Section 16(4)
 deadline (Nov 30, 2026) can't collide with FY2024-25's. The two exception classes are
 now generated from genuinely disjoint fiscal years, independent of which date the
 evaluation happens to run on.
+
+---
+
+## Incident 006 — Threshold slider changes were silently reverted by the status poll
+
+**What happened:**  
+`ControlTower.jsx` polls `GET /api/batch/status` every 2 seconds while a batch is
+loaded, and that poll's callback (`refreshStatus`) also re-fetches the close gates
+using the current threshold values. `refreshStatus` was memoized with `useCallback`
+whose dependency array only listed `refreshGates` — not `thresholds` — so it closed
+over whatever `thresholds` value existed at the moment it was first created. Every
+2-second poll tick then called `refreshGates` with that stale snapshot, silently
+overwriting the Close Readiness Score and gate statuses back to the *old* thresholds
+within seconds of a user dragging a slider. The UI would flash the correct, updated
+score for a moment and then revert it, with no error and no indication anything
+had gone wrong.
+
+**How we found it:**  
+Caught in code review before any browser testing: tracing `refreshStatus`'s
+dependency array against where `thresholds` was read showed a classic React stale-
+closure shape — a `useCallback`/interval combination that captures state at creation
+time instead of at call time.
+
+**Fix:**  
+Added a `thresholdsRef` that is reassigned to the latest `thresholds` value on every
+render (`thresholdsRef.current = thresholds`), and changed `refreshStatus` to read
+`thresholdsRef.current` instead of the closed-over `thresholds` variable. The ref is
+always current regardless of when the enclosing callback was created, so the poll
+and the user's slider changes stay consistent.
+
+**Result:** Verified via Playwright — lowering `min_match_rate` from 0.85 to 0.50
+now keeps the RECONCILIATION gate passed across multiple 2-second poll cycles,
+instead of reverting to BLOCKED within one cycle.
+
+---
+
+## Incident 007 — Pre-flight TDS heuristic flagged 100% of settlements
+
+**What happened:**  
+The pre-flight scan's `looks_like_tds` check flagged a settlement amount as a likely
+TDS adjustment using `abs(gross - round(gross, -2)) < 50`, where `gross` is the
+reconstructed pre-TDS amount. `round(x, -2)` rounds to the nearest hundred, which by
+definition is never more than 50 away from `x` — the comparison was true for almost
+every amount regardless of whether it had anything to do with TDS. The endpoint
+reported 77 of 77 settlements (100%) as "Likely TDS adjustments," a number with no
+discriminating signal at all.
+
+**How we found it:**  
+A live browser check of the pre-flight card showed every single risk-indicator row
+at the same implausible count — no real settlement batch has 100% TDS incidence.
+Cross-checking against the synthetic dataset's actual ground truth showed only 12
+of 77 records are true `AMOUNT_MISMATCH` (TDS) cases.
+
+**Fix:**  
+Replaced the tautological rounding check with a distance-to-whole-rupee test:
+reconstruct `gross = net / (1 - rate)` for each of the 1%/2%/10% TDS rates and flag
+the amount only when `gross` lands within 5 paise of an exact rupee value
+(`min(gross % 100, 100 - gross % 100) < 5`) — a test that is only true for amounts
+that actually reconstruct to a round gross figure, not for arbitrary numbers.
+
+**Result:** Flagged count dropped from 77/77 (100%, meaningless) to 33/77 (43%), a
+plausible heuristic result given the true count of 12 TDS-driven records plus
+coincidental matches inherent to any settlement-only (no-books) heuristic.
